@@ -4,7 +4,6 @@ open Sexplib
 open Conv
 
 type expr =
-  | Alt of expr list
   | Fields of string list * expr
   | Seq of expr list
   | Const of string
@@ -82,8 +81,6 @@ let emit ctx u =
 let rec execute ctx expr sx = 
   match expr, sx with
   | Tag(s, expr'), List[Atom s'; sx'] when s = s' -> execute ctx expr' sx'
-  | Alt[], _ -> ()
-  | Alt(expr1 :: rest), _ -> execute ctx expr1 sx; execute ctx (Alt rest) sx
   | Seq[], _ -> ()
   | Seq(expr1 :: rest), _ -> execute ctx expr1 sx; execute ctx (Seq rest) sx
   | Const u, _ -> emit ctx u
