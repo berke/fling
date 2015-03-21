@@ -16,7 +16,7 @@ with sexp
 module Opt = struct
   let args : string list ref = ref []
   let start = ref ""
-  let sep   = ref " | "
+  let sep   = ref " "
   let stop  = ref "\n"
 end
 
@@ -88,6 +88,7 @@ let rec execute ctx expr sx =
   | Seq(expr1 :: rest), _ -> execute ctx expr1 sx; execute ctx (Seq rest) sx
   | Const u, _ -> emit ctx u
   | Emit, Atom u -> emit ctx u
+  | Emit, _ -> emit ctx (Sexp.to_string sx)
   | Newline, _ ->
     ctx.fields <- 0;
     output_string stdout !Opt.stop
