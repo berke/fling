@@ -6,11 +6,14 @@ open Conv
 type expr =
   | Fields of string list * expr
   | Seq of expr list
+  | Alt of expr list
+  | Equal of string
   | Const of string
   | Emit
-  | Newline
   | Tag of string * expr
 with sexp
+
+exception Mismatch
 
 module Opt = struct
   let args : string list ref = ref []
@@ -69,26 +72,55 @@ let rec sexp_assoc sx = function
 
 type context =
   {
-    mutable fields : int
+    mutable emission : string list;
   }
 
+let backup ctx = { emission = ctx.emission }
+
+let restore ctx ctx' = ctx'.emission <- ctx.emission
+
 let emit ctx u =
-  if ctx.fields = 0 then output_string stdout !Opt.start;
-  if ctx.fields > 0 then output_string stdout !Opt.sep;
-  ctx.fields <- ctx.fields + 1;
-  output_string stdout u
+  ctx.emission <- u :: ctx.emission
+
+let flush ctx =
+  output_string stdout !Opt.start;
+  match List.rev ctx.emission with
+  | [] -> ()
+  | fields ->
+    let i = ref 0 in
+    List.iter
+      (fun u ->
+         if !i > 0 then output_string stdout !Opt.sep;
+         incr i;
+         output_string stdout u)
+      fields;
+    output_string stdout !Opt.stop;
+    ctx.emission <- []
 
 let rec execute ctx expr sx = 
   match expr, sx with
-  | Tag(s, expr'), List[Atom s'; sx'] when s = s' -> execute ctx expr' sx'
+  | Tag(s, expr'), List[Atom s'; sx'] ->
+      if s = s' then
+        execute ctx expr' sx'
+      else
+        raise Mismatch
   | Seq[], _ -> ()
   | Seq(expr1 :: rest), _ -> execute ctx expr1 sx; execute ctx (Seq rest) sx
+  | Alt[], _ -> ()
+  | Alt(expr1 :: rest), _ ->
+    (
+      let ctx' = backup ctx in
+      try
+        execute ctx expr1 sx
+      with
+      | Mismatch ->
+        restore ctx' ctx;
+        execute ctx (Alt rest) sx
+    )
   | Const u, _ -> emit ctx u
+  | Equal u, Atom v -> if u <> v then raise Mismatch
   | Emit, Atom u -> emit ctx u
   | Emit, _ -> emit ctx (Sexp.to_string sx)
-  | Newline, _ ->
-    ctx.fields <- 0;
-    output_string stdout !Opt.stop
   | Fields(us, expr'), List l ->
     List.iter
       (fun u ->
@@ -105,7 +137,12 @@ let perform expr ic =
   try
     while true do 
       let sx = Sexp.input_sexp ic in
-      execute { fields = 0 } expr sx
+      let ctx = { emission = [] } in
+      try
+        execute ctx expr sx;
+        flush ctx
+      with
+      | Mismatch -> ()
     done
   with
   | End_of_file -> ()
