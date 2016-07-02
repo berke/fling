@@ -8,6 +8,7 @@ type expr =
   | Fields of string list * expr
   | Index of int * expr
   | Indices of int list * expr
+  | All of expr
   | Seq of expr list
   | Alt of expr list
   | Equal of string
@@ -24,6 +25,7 @@ module Opt = struct
     let start = ref ""
     let sep   = ref " "
     let stop  = ref "\n"
+    let file : string option ref = ref None
   end
 
 module Spec = struct
@@ -45,6 +47,9 @@ module Spec = struct
 	  Set_string stop,
 	  "<string> Field terminator";
 
+	  "--file",
+	  String(fun fn -> file := Some fn),
+	  "<file> Process given input file instead of stdin";
 	]
   end
 
@@ -163,9 +168,10 @@ let rec execute ctx expr sx =
   | Fields(us, expr'), List l -> fields us expr' l
   | Index(n, expr'), List l -> indices [n] expr' l
   | Indices(ns, expr'), List l -> indices ns expr' l
+  | All expr', List l -> List.iter (execute ctx expr') l
   | _ -> ()
 
-let perform expr ic =
+let perform ic expr =
   try
     while true do 
       let sx = Sexp.input_sexp ic in
@@ -179,15 +185,17 @@ let perform expr ic =
   with
   | End_of_file -> ()
 
-let main = function
-  | [expr] ->
-     perform (parse expr) stdin
-  | expr :: rest ->
-     List.iter
-       (fun fn ->
-        wrap (open_in fn) close_in (perform (parse expr)))
-       rest
+let main exprs =
+  let on_file f =
+    match !Opt.file with
+    | None -> f stdin
+    | Some fn -> wrap (open_in fn) close_in f
+  in
+  match exprs with
   | [] -> raise (Arg.Bad "No expression specified")
+  | exprs ->
+     let exprs' = List.map parse exprs in
+     on_file (fun ic -> List.iter (perform ic) exprs')
 
 let _ =
   (
@@ -195,7 +203,7 @@ let _ =
       Arg.parse
         Spec.specs
         (fun u -> Opt.args := u :: !Opt.args)
-        (Printf.sprintf "Usage: %s [options] <expr> [file]" Sys.argv.(0));
+        (Printf.sprintf "Usage: %s [options] [--file <file>] <expr1...>" Sys.argv.(0));
     with
     | Arg.Bad b ->
        Printf.fprintf Pervasives.stderr "%s\n%s\n"
