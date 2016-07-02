@@ -13,9 +13,12 @@ type expr =
   | Alt of expr list
   | Equal of string
   | Const of string
+  | Raw of string
   | Emit
   | Pad of int * expr
   | Tag of string * expr
+  | Tight of expr
+  | Sep of string * expr
   with sexp
 
 exception Mismatch
@@ -81,17 +84,35 @@ let rec sexp_assoc sx = function
 
 type context =
   {
-    mutable emission : string list;
-    mutable padding  : int;
+    mutable emission  : string list;
+    mutable padding   : int;
+    mutable separator : string;
+    mutable first     : bool;
   }
 
 let backup ctx = { ctx with emission = ctx.emission }
 
-let restore ctx ctx' =
-  ctx'.emission <- ctx.emission;
-  ctx'.padding <- ctx.padding
+let restore ?(emission=true) ctx ctx' =
+  if emission then
+    (
+      ctx'.emission <- ctx.emission;
+      ctx'.first <- ctx.first
+    );
+  ctx'.padding <- ctx.padding;
+  ctx'.separator <- ctx.separator
 
-let emit ctx u =
+let with_context ctx f =
+  let old = backup ctx in
+  try
+    let y = f ctx in
+    restore ~emission:false old ctx;
+    y
+  with
+  | e ->
+     restore old ctx;
+     raise e
+
+let emit ?(separate=true) ctx u =
   let m = String.length u in
   let u =
     if ctx.padding > 0 then
@@ -102,20 +123,25 @@ let emit ctx u =
     else
       u
   in
-  ctx.emission <- u :: ctx.emission
+  ctx.emission <-
+    if separate then
+      if ctx.first then
+	(
+	  ctx.first <- false;
+	  u :: ctx.emission
+	)
+      else
+	u :: ctx.separator :: ctx.emission
+    else
+      u :: ctx.emission
 
 let flush ctx =
   output_string stdout !Opt.start;
   match ctx.emission with
   | [] -> ()
   | fields ->
-     let i = ref 0 in
      List.iter
-       (fun u ->
-        if !i > 0 then output_string stdout !Opt.sep;
-        incr i;
-        output_string stdout u
-       )
+       (fun u -> output_string stdout u)
        (List.rev fields);
      output_string stdout !Opt.stop;
      ctx.emission <- []
@@ -135,6 +161,12 @@ let rec execute ctx expr sx =
   let indices ns expr' l =
     let sxs' = try List.map (List.nth l) ns with _ -> raise Mismatch in
     List.iter (execute ctx expr') sxs'
+  in
+  let push_sep sep expr sx =
+    with_context ctx
+    @@ fun ctx ->
+       ctx.separator <- sep;
+       execute ctx expr sx
   in
   match expr, sx with
   | Tag(s, expr'), List[Atom s'; sx'] ->
@@ -156,14 +188,19 @@ let rec execute ctx expr sx =
           execute ctx (Alt rest) sx
      )
   | Const u, _ -> emit ctx u
+  | Raw u, _ -> emit ~separate:false ctx u; ctx.first <- true
   | Equal u, Atom v -> if u <> v then raise Mismatch
   | Emit, Atom u -> emit ctx u
   | Emit, _ -> emit ctx (Sexp.to_string sx)
-  | Pad(n, expr), _ ->
-     let padding = ctx.padding in
-     ctx.padding <- n;
-     execute ctx expr sx;
-     ctx.padding <- padding
+  | Pad(n, expr), _ -> let padding = ctx.padding in ctx.padding <- n; execute ctx expr sx; ctx.padding <- padding
+  | Tight expr, _ ->
+     emit ctx "";
+     ctx.first <- true;
+     push_sep "" expr sx
+  | Sep(u, expr), _ ->
+     emit ctx "";
+     ctx.first <- true;
+     push_sep u expr sx
   | Field(u, expr'), List l -> fields [u] expr' l
   | Fields(us, expr'), List l -> fields us expr' l
   | Index(n, expr'), List l -> indices [n] expr' l
@@ -175,7 +212,7 @@ let perform ic expr =
   try
     while true do 
       let sx = Sexp.input_sexp ic in
-      let ctx = { emission = []; padding = 0 } in
+      let ctx = { emission = []; padding = 0; separator = !Opt.sep; first = true } in
       try
         execute ctx expr sx;
         flush ctx
