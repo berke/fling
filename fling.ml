@@ -19,6 +19,20 @@ type expr =
   | Tag of string * expr
   | Tight of expr
   | Sep of string * expr
+  | Select of range * expr
+and range =
+  | Full
+  | Empty
+  | Inter of range * range
+  | Union of range * range
+  | From of prop
+  | While of prop
+  | First of prop
+and prop =
+  | Atomic of string
+  | And of prop list
+  | Or of prop list
+  | Not of prop
   with sexp
 
 exception Mismatch
@@ -168,6 +182,49 @@ let rec execute ctx expr sx =
        ctx.separator <- sep;
        execute ctx expr sx
   in
+  let range rng l =
+    let a = Array.of_list l in
+    let m = Array.length a in
+    let indicator f = Array.init m (fun i -> f i a.(i)) in
+    let rec eval = function
+      | Full -> indicator (fun _ _ -> true)
+      | Empty -> indicator (fun _ _ -> false)
+      | Inter(rng1, rng2) ->
+	 let u1, u2 = eval rng1, eval rng2 in
+	 indicator (fun i _ -> u1.(i) && u2.(i))
+      | Union(rng1, rng2) ->
+	 let u1, u2 = eval rng1, eval rng2 in
+	 indicator (fun i _ -> u1.(i) || u2.(i))
+      | From p ->
+	 let b = eval_prop p in
+	 let q = ref false in
+	 indicator (fun i _ -> let x = !q || b.(i) in q := !q || b.(i); x)
+      | While p ->
+	 let b = eval_prop p in
+	 let q = ref true in
+	 indicator (fun i _ -> let x = !q && b.(i) in q := !q && b.(i); x)
+      | First p ->
+	 let b = eval_prop p in
+	 let q = ref true in
+	 indicator (fun i _ -> let x = !q && b.(i) in q := !q && not b.(i); x)
+    and eval_prop p = indicator (prop p)
+    and prop q i x =
+      match q, x with
+      | Atomic u, Atom u' when u = u' -> true
+      | And pl, _ -> List.for_all (fun q' -> prop q' i x) pl
+      | Or pl, _ -> List.exists (fun q' -> prop q' i x) pl
+      | Not q', _ -> not (prop q' i x)
+      | _ -> false
+    in
+    let r = eval rng in
+    let rec loop res i =
+      if i = m then
+	res
+      else
+	loop (if r.(i) then a.(i) :: res else res) (i + 1)
+    in
+    List.rev (loop [] 0)
+  in
   match expr, sx with
   | Tag(s, expr'), List[Atom s'; sx'] ->
      if s = s' then
@@ -205,6 +262,7 @@ let rec execute ctx expr sx =
   | Fields(us, expr'), List l -> fields us expr' l
   | Index(n, expr'), List l -> indices [n] expr' l
   | Indices(ns, expr'), List l -> indices ns expr' l
+  | Select(rng, expr'), List l -> execute ctx expr' (List(range rng l))
   | All expr', List l -> List.iter (execute ctx expr') l
   | _ -> ()
 
