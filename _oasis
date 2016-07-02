@@ -12,3 +12,4 @@ Executable fling
   MainIs:     fling.ml
   BuildDepends: sexplib, sexplib.syntax
   CompiledObject: best
+  Install:    true
