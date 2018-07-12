@@ -1,0 +1,15 @@
+opam-version: "1.2"
+version: "1.0"
+maintainer: "berke.durak@gmail.com"
+authors: ["Berke Durak"]
+homepage: "https://github.com/berke/fling"
+bug-reports: "https://github.com/berke/fling/issues"
+dev-repo: "https://github.com/berke/fling.git"
+license: "http://lambda-diode.com/"
+build: [
+  ["jbuilder" "build" "--root" "." "-j" jobs "@install"]
+]
+depends: [
+  "ppx_sexp_conv"
+  "sexplib"
+]

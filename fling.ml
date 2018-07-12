@@ -33,7 +33,7 @@ and prop =
   | And of prop list
   | Or of prop list
   | Not of prop
-  with sexp
+  [@@deriving sexp]
 
 exception Mismatch
 
