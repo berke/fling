@@ -1,7 +1,0 @@
-(executable
- ((name fling)
-  (public_name fling)
-  (preprocess (pps (ppx_sexp_conv)))
-  (libraries (sexplib))
- )
-)

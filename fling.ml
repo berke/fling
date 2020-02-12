@@ -87,7 +87,7 @@ let parse expr =
     Sexp.of_string expr |> expr_of_sexp
   with
   | Pre_sexp.Of_sexp_error(x,y) ->
-     Printf.eprintf "%s: Bad expression\n%a\n%!" Sys.argv.(0)
+     Printf.eprintf "%s: Bad expression (%s)\n%a\n%!" Sys.argv.(0) (Printexc.to_string x)
 		    Sexp.output_hum y;
      exit 1
 
